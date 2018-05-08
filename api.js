@@ -232,50 +232,53 @@ class Api extends Emittery {
 	}
 
 	_computeForkExecArgv() {
-		const execArgv = this.options.testOnlyExecArgv || process.execArgv;
+		const env = this.options.testOnlyEnv || process.env;
+		let execArgv = this.options.testOnlyExecArgv || process.execArgv;
+
+		// Append NODE_DEBUG_OPTION, if any, from env to our args (JetBrains IDE)
+		const debugOpt = env.NODE_DEBUG_OPTION || '';
+		if (debugOpt.length !== 0) {
+			execArgv = execArgv.concat(debugOpt.split(/\s+/));
+		}
+
 		if (execArgv.length === 0) {
 			return Promise.resolve(execArgv);
 		}
 
-		let debugArgIndex = -1;
+		// --(inspect|debug)-brk is same as --(inspect|debug) but breaks on first line
+		const debugRex = /^--(inspect|debug)(-brk)?(=.+)?$/;
+		const debugFlag = Number(process.version.split('.')[0].slice(1)) < 8 ? 'debug' : 'inspect';
+		let debugArg = false;
+		let debugBrk = '';
+		let debugPort = -1;
 
-		// --inspect-brk is used in addition to --inspect to break on first line and wait
-		execArgv.some((arg, index) => {
-			const isDebugArg = /^--inspect(-brk)?($|=)/.test(arg);
-			if (isDebugArg) {
-				debugArgIndex = index;
+		// In case of several matches, use just the last one (same as Node CLI)
+		execArgv = execArgv.filter(arg => {
+			const debugMatch = debugRex.exec(arg);
+			if (debugMatch === null) {
+				return true;
 			}
-
-			return isDebugArg;
+			debugBrk = debugMatch[2] || '';
+			debugPort = Number(debugMatch[3]);
+			debugArg = true;
+			return false;
 		});
 
-		const isInspect = debugArgIndex >= 0;
-		if (!isInspect) {
-			execArgv.some((arg, index) => {
-				const isDebugArg = /^--debug(-brk)?($|=)/.test(arg);
-				if (isDebugArg) {
-					debugArgIndex = index;
-				}
-
-				return isDebugArg;
-			});
-		}
-
-		if (debugArgIndex === -1) {
+		if (debugArg) {
 			return Promise.resolve(execArgv);
 		}
 
-		return getPort().then(port => {
-			const forkExecArgv = execArgv.slice();
-			let flagName = isInspect ? '--inspect' : '--debug';
-			const oldValue = forkExecArgv[debugArgIndex];
-			if (oldValue.indexOf('brk') > 0) {
-				flagName += '-brk';
+		if (debugPort !== -1) {
+			if (!isNaN(debugPort) && debugPort >= 1024 && debugPort < 65536) {
+				execArgv.push(`--${debugFlag}${debugBrk}=${debugPort}`);
+				return Promise.resolve(execArgv);
 			}
+			console.warn(`'Invalid debug port ${debugPort}, falling back to automatic`);
+		}
 
-			forkExecArgv[debugArgIndex] = `${flagName}=${port}`;
-
-			return forkExecArgv;
+		return getPort().then(port => {
+			execArgv.push(`--${debugFlag}${debugBrk}=${port}`);
+			return execArgv;
 		});
 	}
 }

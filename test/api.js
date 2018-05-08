@@ -878,62 +878,54 @@ test('using --match with matching tests will only report those passing tests', t
 	});
 });
 
-function generatePassDebugTests(execArgv, expectedInspectIndex) {
+function generatePassDebugTests(env, execArgv, expectedPort) {
 	test(`pass ${execArgv.join(' ')} to fork`, t => {
-		const api = apiCreator({testOnlyExecArgv: execArgv});
+		const flag = Number(process.version.split('.')[0].slice(1)) < 8 ? 'debug' : 'inspect';
+		const api = apiCreator({testOnlyEnv: env, testOnlyExecArgv: execArgv});
 		return api._computeForkExecArgv()
 			.then(result => {
-				t.true(result.length === execArgv.length);
-				if (expectedInspectIndex === -1) {
-					t.true(/--debug=\d+/.test(result[0]));
-				} else {
-					t.true(/--inspect=\d+/.test(result[expectedInspectIndex]));
+				t.true(result.length === 1);
+				t.true(new RegExp(`--${flag}=\\d+`).test(result[0]));
+				if (expectedPort !== -1) {
+					t.is(result[0], `--${flag}=${expectedPort}`);
 				}
 			});
 	});
 }
 
-function generatePassDebugIntegrationTests(execArgv) {
+function generatePassDebugIntegrationTests(env, execArgv) {
 	test(`pass ${execArgv.join(' ')} to fork`, t => {
-		const api = apiCreator({testOnlyExecArgv: execArgv});
-		return api.run([path.join(__dirname, 'fixture/debug-arg.js')])
+		const flag = Number(process.version.split('.')[0].slice(1)) < 8 ? 'debug' : 'inspect';
+		const api = apiCreator({testOnlyEnv: env, testOnlyExecArgv: execArgv});
+		return api.run([path.join(__dirname, `fixture/${flag}-arg.js`)])
 			.then(runStatus => {
 				t.is(runStatus.stats.passedTests, 1);
 			});
 	});
 }
 
-function generatePassInspectIntegrationTests(execArgv) {
-	test(`pass ${execArgv.join(' ')} to fork`, t => {
-		const api = apiCreator({testOnlyExecArgv: execArgv});
-		return api.run([path.join(__dirname, 'fixture/inspect-arg.js')])
-			.then(runStatus => {
-				t.is(runStatus.stats.passedTests, 1);
-			});
-	});
-}
+generatePassDebugTests({}, ['--debug=9229'], 9229);
+generatePassDebugTests({}, ['--debug=0'], -1);
+generatePassDebugTests({}, ['--debug=x'], -1);
+generatePassDebugTests({}, ['--debug'], -1);
 
-generatePassDebugTests(['--debug=0'], -1);
-generatePassDebugTests(['--debug'], -1);
+generatePassDebugTests({}, ['--inspect=9229'], 9229);
+generatePassDebugTests({}, ['--inspect=0'], -1);
+generatePassDebugTests({}, ['--inspect=x'], -1);
+generatePassDebugTests({}, ['--inspect'], -1);
 
-generatePassDebugTests(['--inspect=0'], 0);
-generatePassDebugTests(['--inspect'], 0);
+// Env takes precedence over args
+generatePassDebugTests({NODE_DEBUG_OPTION: '--debug=9229'}, ['--debug=2992'], 9229);
+generatePassDebugTests({NODE_DEBUG_OPTION: '--inspect=9229'}, ['--inspect=2992'], 9229);
 
-// --inspect takes precedence
-generatePassDebugTests(['--inspect=0', '--debug-brk'], 0);
-generatePassDebugTests(['--inspect', '--debug-brk'], 0);
+// Within args, last one takes precedence
+generatePassDebugTests({}, ['--debug-brk=2992', '--inspect=9229'], 9229);
+generatePassDebugTests({}, ['--inspect-brk=2992', '--debug=9229'], 9229);
 
-// --inspect takes precedence, though --debug-brk is still passed to the worker
-generatePassDebugTests(['--debug-brk', '--inspect=0'], 1);
-generatePassDebugTests(['--debug-brk', '--inspect'], 1);
-
-if (Number(process.version.split('.')[0].slice(1)) < 8) {
-	generatePassDebugIntegrationTests(['--debug=0']);
-	generatePassDebugIntegrationTests(['--debug']);
-} else {
-	generatePassInspectIntegrationTests(['--inspect=9229']);
-	generatePassInspectIntegrationTests(['--inspect']);
-}
+generatePassDebugIntegrationTests({}, ['--debug=9229']);
+generatePassDebugIntegrationTests({}, ['--debug']);
+generatePassDebugIntegrationTests({}, ['--inspect=9229']);
+generatePassDebugIntegrationTests({}, ['--inspect']);
 
 test('`esm` package support', t => {
 	const api = apiCreator({
